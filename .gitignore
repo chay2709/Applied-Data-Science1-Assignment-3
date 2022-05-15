@@ -127,3 +127,252 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+import sys
+
+import pandas as pd
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from scipy.optimize import differential_evolution
+import warnings
+import numpy, scipy, matplotlib
+import numpy as np
+from log import logger
+
+
+filepath = sys.argv[1]
+df = pd.read_csv(filepath)
+df_remove_nan_rows = df.iloc[3:, :]
+main_df = df_remove_nan_rows.iloc[1:, :]
+
+
+def plot_clusters(co2_df, kmeans, centroids):
+    """
+    plots clusters
+    :param co2_df: dataframe has co2 emissions data
+    :param kmeans: kmeans algo
+    :param centroids: centroids
+    """
+    plt.figure(figsize=(13, 5))
+    plt.title("clustering of CO2 emissions in 1960 and 2010 ")
+    plt.scatter(co2_df[1960.0], co2_df[2010.0], c=kmeans.labels_.astype(float))
+    plt.scatter(centroids[:, 0], centroids[:, 1], c='red')
+    plt.show()
+
+
+def apply_kmeans(co2_df):
+    """
+    this function applies kmeans algorithm on c02 dataframe
+    :param co2_df: co2 emissions dataframe for the years 1960 and 2010
+    :plots: plots clusters
+    """
+
+    kmeans = KMeans(n_clusters=8)
+    kmeans.fit(co2_df)
+    centroids = kmeans.cluster_centers_
+
+    plot_clusters(co2_df, kmeans, centroids)
+
+
+def filter_co2_emissions():
+    """
+    get co2 emissions data for the years 1960 and 2010
+    :return: dataframe
+    """
+    co2_df = main_df[[1960.0, 2010.0]].where(
+        main_df['Indicator Name'].isin(['CO2 emissions from liquid fuel consumption (kt)'])).dropna()
+    return co2_df
+
+
+def get_year_df():
+    """
+    get few years of data from country Japan for various indicators agricultural land and urban population
+    :return: dataframe contains  agricultural land and urban population from 1970 to 2015
+    """
+
+    df_years = main_df[
+        ['Indicator Name', 1970.0, 1975.0, 1980.0, 1985.0, 1990.0, 1995.0, 2000.0, 2005.0, 2010.0, 2015.0]].where(
+        main_df['Country Name'].isin(['Japan', ''])).dropna()
+    agr_df = df_years.where(
+        (df_years['Indicator Name'] == 'Agricultural land (% of land area)') |
+        (df_years['Indicator Name'] == 'Population in urban agglomerations of more than 1 million (% of total population)')
+    ).dropna()
+    agr_t_df = agr_df.set_index('Indicator Name').transpose()
+    return agr_t_df
+
+
+def plot_line(df):
+    """
+    :param df: dataframe
+    :plots: plots line graph
+    """
+    df.plot.line()
+
+def generate_boundaries():
+    """
+    get boundaries for various parameters
+    :return: boundaries
+    """
+    Bounds = []
+    Bounds.append([0.0, 100.0])
+    Bounds.append([0.0, 1.0])
+    Bounds.append([0.0, 1.0])
+
+    res = differential_evolution(sumOfSquaredError, Bounds, seed=3)
+    return res.x
+
+def func(x, a, b, c):
+    """
+    sine function for curve fitting
+    :param x: function
+    :param a: indicator1 values
+    :param b: indicator2 values
+    :param c: params
+    :return:
+    """
+    return (a*numpy.sin(b*x))+(c * numpy.exp(x))
+
+
+def get_indicator1():
+    """
+    get indicator 1 data
+    :return: indicator1 values
+    """
+
+    agr_t_df = get_year_df()
+    ind1_data = agr_t_df['Population in urban agglomerations of more than 1 million (% of total population)'].to_numpy()
+    return ind1_data
+
+def get_indicator2():
+    """
+    get indicator 2 data
+    :return: indicator2 values
+    """
+
+    agr_t_df = get_year_df
+    ind2_data = agr_t_df['Agricultural land (% of land area)'].to_numpy()
+    return ind2_data
+
+
+def sumOfSquaredError(Tuple):
+    warnings.filterwarnings("ignore")
+    val = func(get_indicator1(), *Tuple)
+    return numpy.sum((get_indicator2() - val) ** 2.0)
+
+
+def plot_model_scatter(ind1_data,ind2_data, fittedParams):
+    """
+    :param ind1_data: indicator1 data
+    :param ind2_data: indicator2 data
+    :param fittedParams: fitted parameters
+    :plots: plots scatter graph for the model
+    """
+    Width = 800
+    Height = 600
+    f = plt.figure(figsize=(Width / 100.0, Height / 100.0), dpi=100)
+    axes = f.add_subplot(111)
+
+    axes.plot(ind1_data, ind2_data, 'D')
+    ind1_model = numpy.linspace(min(ind1_data), max(ind1_data))
+    ind2_model = func(ind1_model, *fittedParams)
+
+    axes.plot(ind1_model, ind2_model)
+
+    axes.set_xlabel(
+        'Population in urban agglomerations of more than 1 million (% of total population)')  # X axis data label
+    axes.set_ylabel('Agricultural land (% of land area)')  # Y axis data label
+
+    plt.title("curved fit for Population in urban against Agricultural land")
+    plt.show()
+    plt.close('all')
+
+
+def curve_fitting(agr_t_df):
+    """
+    plots curve fitting and gets rsquared and rootmean square values
+    """
+    plot_line(agr_t_df)
+
+    ind1_data = get_indicator1()
+    ind2_data = get_indicator2()
+
+    generic_Params = generate_boundaries()
+    fittedParams, pcov = curve_fit(func, ind1_data, ind2_data, generic_Params)
+    modelPredictions = func(ind1_data, *fittedParams)
+    absError = modelPredictions - ind2_data
+
+    squared_errors = numpy.square(absError)
+    mean_squared_errors = numpy.mean(squared_errors)
+    Root_Mean_Squared_error = numpy.sqrt(mean_squared_errors)
+    Rsquared = 1.0 - (numpy.var(absError) / numpy.var(ind2_data))
+
+    plot_model_scatter(ind1_data, ind2_data, fittedParams)
+
+
+def plot_curves(agr_t_df, linear, logistic, exponential):
+    """
+    :param agr_t_df: dataframe has various years for different indicators
+    :param linear:
+    :param logistic:
+    :param exponential:
+    :plots: plots graphs
+    """
+    fig, ax = plt.subplots(figsize=(13, 5))
+    ax.scatter(agr_t_df["Population in urban agglomerations of more than 1 million (% of total population)"].index,
+               agr_t_df["Population in urban agglomerations of more than 1 million (% of total population)"].values,
+               color="black")
+    ax.plot(agr_t_df["Population in urban agglomerations of more than 1 million (% of total population)"].index,
+            exponential, label="exponential", color="green")
+    ax.plot(agr_t_df["Population in urban agglomerations of more than 1 million (% of total population)"].index,
+            linear, label="linear", color="red")
+    ax.plot(agr_t_df["Population in urban agglomerations of more than 1 million (% of total population)"].index,
+            logistic, label="logistic", color="blue")
+
+    plt.title("curved fit for Population in urban over 30 year period")
+    plt.yticks(np.arange(30, 100, 5))
+    ax.legend()
+    plt.show()
+
+
+def compare_curves(agr_t_df):
+    """
+    compare the fitted curves exponetial vs linear vs logistic
+    :param agr_t_df: dataframe has various years data for different indicators
+    :plots: plots scatter graph
+    """
+
+    def lin_func(x):
+        return 50 + 1 * x
+
+    def log_func(x):
+        return 2000 / (1 + np.exp(-0.5 * (x - 15)))
+
+    def exp_func(x):
+        return 10 + 1.18 ** x
+
+    linear = lin_func(x=np.arange(len(agr_t_df)))
+    logistic = log_func(x=np.arange(len(agr_t_df)))
+    exponential = exp_func(x=np.arange(len(agr_t_df)))
+
+    plot_curves(agr_t_df, linear, logistic, exponential )
+
+
+def main():
+    # filter indicator co2 emissions from main dataset
+    co2_df = filter_co2_emissions()
+
+    # apply kmeans for clustering the co2 emission data
+    apply_kmeans(co2_df)
+
+    # get a few years of data for aggregations
+    agr_t_df = get_year_df()
+
+    # plots curve fitting
+    curve_fitting(agr_t_df)
+
+    # compare curves exponent vs linear vs logistic
+    compare_curves(agr_t_df)
+
+
+if __name__=='__main__':
+    main()
